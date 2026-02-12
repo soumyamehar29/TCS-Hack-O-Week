@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI Product Recommendation Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/alpinejs/3.12.0/cdn.min.js" defer></script>
+  <style id="app-style">
+    .active-tab {
+      color: #3b82f6;
+      border-bottom: 2px solid #3b82f6;
+    }
+    
+    .file-drop-area {
+      border: 2px dashed #cbd5e1;
+      border-radius: 0.5rem;
+      transition: all 0.3s ease;
+    }
+    
+    .file-drop-area.drag-over {
+      border-color: #3b82f6;
+      background-color: rgba(59, 130, 246, 0.05);
+    }
+    
+    .recommendation-view-btn.active {
+      background-color: #3b82f6;
+      color: white;
+    }
+    
+    .loader {
+      border-top-color: #3b82f6;
+      animation: spinner 1s linear infinite;
+    }
+    
+    @keyframes spinner {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body class="bg-gray-50 text-gray-800 font-sans" x-data="appData()">
+  <div class="min-h-screen flex flex-col">
+    <!-- Header -->
+    <header class="bg-white shadow-sm">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="flex justify-between h-16">
+          <div class="flex items-center">
+            <i class="fas fa-robot text-blue-500 text-2xl mr-3"></i>
+            <h1 class="text-xl font-semibold">AI Product Recommendations</h1>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="flex-grow">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        <!-- Navigation Tabs -->
+        <div class="border-b border-gray-200 mb-6">
+          <nav class="flex -mb-px space-x-8">
+            <button @click="activeTab = 'bulk'" :class="{'active-tab': activeTab === 'bulk'}" class="py-4 px-1 font-medium text-sm">
+              <i class="fas fa-file-upload mr-2"></i>Bulk Upload
+            </button>
+            <button @click="activeTab = 'live'" :class="{'active-tab': activeTab === 'live'}" class="py-4 px-1 font-medium text-sm">
+              <i class="fas fa-sync-alt mr-2"></i>Live Sync
+            </button>
+            <button @click="activeTab = 'manual'" :class="{'active-tab': activeTab === 'manual'}" class="py-4 px-1 font-medium text-sm">
+              <i class="fas fa-keyboard mr-2"></i>Manual Entry
+            </button>
+          </nav>
+        </div>
+
+        <div class="flex flex-col md:flex-row space-y-6 md:space-y-0 md:space-x-6">
+          <!-- Main Panel -->
+          <div class="w-full md:w-3/4 bg-white shadow rounded-lg p-6">
+            <!-- Bulk Upload Panel -->
+            <div x-show="activeTab === 'bulk'" class="space-y-6">
+              <h2 class="text-lg font-medium">Upload Customer Data</h2>
+              <p class="text-sm text-gray-500">Upload a CSV or JSON file containing customer browsing and purchasing history.</p>
+              
+              <div 
+                class="file-drop-area p-8 text-center"
+                x-ref="dropzone"
+                @dragover.prevent="isDragging = true"
+                @dragleave.prevent="isDragging = false"
+                @drop.prevent="handleFileDrop"
+                :class="{'drag-over': isDragging}"
+              >
+                <i class="fas fa-cloud-upload-alt text-4xl text-gray-400 mb-3"></i>
+                <p class="mb-3">Drag and drop your file here, or <span class="text-blue-500">browse</span></p>
+                <input type="file" id="fileInput" class="hidden" accept=".csv,.json" @change="handleFileSelect">
+                <button @click="document.getElementById('fileInput').click()" class="bg-blue-500 hover:bg-blue-600 text-white py-2 px-4 rounded">
+                  Select File
+                </button>
+              </div>
+              
+              <div x-show="selectedFile" class="bg-gray-50 p-4 rounded border">
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center">
+                    <i class="fas fa-file-alt text-blue-500 mr-3"></i>
+                    <div>
+                      <p class="font-medium" x-text="selectedFile?.name"></p>
+                      <p class="text-sm text-gray-500" x-text="formatFileSize(selectedFile?.size)"></p>
+                    </div>
+                  </div>
+                  <button @click="selectedFile = null" class="text-gray-400 hover:text-gray-600">
+                    <i class="fas fa-times"></i>
+                  </button>
+                </div>
+              </div>
+              
+              <div x-show="filePreview" class="border rounded overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200">
+                  <thead class="bg-gray-50">
+                    <tr>
+                      <template x-for="(header, index) in fileHeaders" :key="index">
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" x-text="header"></th>
+                      </template>
+                    </tr>
+                  </thead>
+                  <tbody class="bg-white divide-y divide-gray-200">
+                    <template x-for="(row, index) in filePreviewRows" :key="index">
+                      <tr>
+                        <template x-for="(header, hIndex) in fileHeaders" :key="hIndex">
+                          <td class="px-6 py-4 whitespace-nowrap text-sm" x-text="row[header]"></td>
+                        </template>
+                      </tr>
+                    </template>
+                  </tbody>
+                </table>
+              </div>
+              
+              <div class="flex justify-end">
+                <button 
+                  @click="getRecommendations" 
+                  class="bg-blue-500 hover:bg-blue-600 text-white py-2 px-6 rounded disabled:opacity-50" 
+                  :disabled="!selectedFile"
+                >
+                  Get Recommendations
+                </button>
+              </div>
+            </div>
+            
+            <!-- Live Sync Panel -->
+            <div x-show="activeTab === 'live'" class="space-y-6">
+              <h2 class="text-lg font-medium">Connect Your E-commerce Platform</h2>
+              <p class="text-sm text-gray-500">Connect your store to get real-time product recommendations for your customers.</p>
+              
+              <form @submit.prevent="testConnection" class="space-y-4">
+                <div class="space-y-2">
+                  <label for="platform" class="block text-sm font-medium text-gray-700">E-commerce Platform</label>
+                  <select id="platform" x-model="apiCredentials.platform" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md border">
+                    <option value="">Select a platform</option>
+                    <option value="shopify">Shopify</option>
+                    <option value="woocommerce">WooCommerce</option>
+                    <option value="magento">Magento</option>
+                    <option value="bigcommerce">BigCommerce</option>
+                  </select>
+                </div>
+                
+                <div class="space-y-2">
+                  <label for="apiKey" class="block text-sm font-medium text-gray-700">API Key</label>
+                  <input type="text" id="apiKey" x-model="apiCredentials.key" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                </div>
+                
+                <div class="space-y-2">
+                  <label for="apiSecret" class="block text-sm font-medium text-gray-700">API Secret</label>
+                  <input type="password" id="apiSecret" x-model="apiCredentials.secret" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                </div>
+                
+                <div class="pt-2 flex justify-end">
+                  <button type="submit" class="bg-blue-500 hover:bg-blue-600 text-white py-2 px-6 rounded disabled:opacity-50" :disabled="!isApiFormValid">
+                    <span x-show="!connectionTesting">Test Connection</span>
+                    <span x-show="connectionTesting" class="flex items-center">
+                      <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      Testing...
+                    </span>
+                  </button>
+                </div>
+              </form>
+              
+              <div x-show="connectionStatus === 'success'" class="rounded-md bg-green-50 p-4">
+                <div class="flex">
+                  <div class="flex-shrink-0">
+                    <i class="fas fa-check-circle text-green-400"></i>
+                  </div>
+                  <div class="ml-3">
+                    <h3 class="text-sm font-medium text-green-800">Connection successful!</h3>
+                    <div class="mt-2 text-sm text-green-700">
+                      <p>Your e-commerce store is now connected. Click "Get Recommendations" to generate product suggestions for your customers.</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              <div x-show="connectionStatus === 'error'" class="rounded-md bg-red-50 p-4">
+                <div class="flex">
+                  <div class="flex-shrink-0">
+                    <i class="fas fa-exclamation-circle text-red-400"></i>
+                  </div>
+                  <div class="ml-3">
+                    <h3 class="text-sm font-medium text-red-800">Connection failed</h3>
+                    <div class="mt-2 text-sm text-red-700">
+                      <p>We couldn't connect to your store. Please check your API credentials and try again.</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              <div class="flex justify-end" x-show="connectionStatus === 'success'">
+                <button @click="getRecommendations" class="bg-blue-500 hover:bg-blue-600 text-white py-2 px-6 rounded">
+                  Get Recommendations
+                </button>
+              </div>
+            </div>
+            
+            <!-- Manual Entry Panel -->
+            <div x-show="activeTab === 'manual'" class="space-y-6">
+              <h2 class="text-lg font-medium">Manual Customer Data Entry</h2>
+              <p class="text-sm text-gray-500">Enter customer browsing and purchasing history manually.</p>
+              
+              <form @submit.prevent="submitManualEntry" class="space-y-4">
+                <div class="space-y-2">
+                  <label for="customerId" class="block text-sm font-medium text-gray-700">Customer ID</label>
+                  <input type="text" id="customerId" x-model="manualEntry.customerId" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                </div>
+                
+                <div class="space-y-2">
+                  <label for="browsedProducts" class="block text-sm font-medium text-gray-700">Browsed Product SKUs</label>
+                  <textarea id="browsedProducts" x-model="manualEntry.browsedProducts" placeholder="Enter SKUs separated by commas" rows="3" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"></textarea>
+                  <p class="text-xs text-gray-500">Example: SKU001, SKU002, SKU003</p>
+                </div>
+                
+                <div class="space-y-2">
+                  <label for="purchasedProducts" class="block text-sm font-medium text-gray-700">Purchased Product SKUs</label>
+                  <textarea id="purchasedProducts" x-model="manualEntry.purchasedProducts" placeholder="Enter SKUs separated by commas" rows="3" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"></textarea>
+                  <p class="text-xs text-gray-500">Example: SKU001, SKU002, SKU003</p>
+                </div>
+                
+                <div class="pt-2 flex justify-end">
+                  <button type="submit" class="bg-blue-500 hover:bg-blue-600 text-white py-2 px-6 rounded disabled:opacity-50" :disabled="!isManualFormValid">
+                    Get Recommendations
+                  </button>
+                </div>
+              </form>
+            </div>
+            
+            <!-- Loading Indicator -->
+            <div x-show="loading" class="flex flex-col items-center justify-center py-12">
+              <div class="loader ease-linear rounded-full border-4 border-t-4 border-gray-200 h-12 w-12 mb-4"></div>
+              <h2 class="text-center text-gray-600">Generating AI recommendations...</h2>
+              <p class="text-center text-sm text-gray-500 mt-2">This may take a moment</p>
+            </div>
+            
+            <!-- Results Section -->
+            <div x-show="recommendations.length > 0 && !loading" class="mt-8 space-y-6">
+              <div class="flex items-center justify-between">
+                <h2 class="text-lg font-medium">Product Recommendations</h2>
+                <button @click="startOver" class="text-sm text-gray-500 hover:text-gray-700 flex items-center">
+                  <i class="fas fa-redo mr-1"></i> Start Over
+                </button>
+              </div>
+              
+              <!-- List View -->
+              <div x-show="viewMode === 'list'" class="space-y-4">
+                <template x-for="(item, index) in recommendations" :key="index">
+                  <div class="flex items-center border rounded-lg overflow-hidden">
+                    <div class="w-24 h-24 flex-shrink-0">
+                      <img :src="item.image" :alt="item.name" class="w-full h-full object-cover">
+                    </div>
+                    <div class="p-4 flex-grow">
+                      <h3 class="font-medium" x-text="item.name"></h3>
+                      <p class="text-sm text-gray-500 mt-1" x-text="item.description"></p>
+                      <div class="flex items-center justify-between mt-2">
+                        <span class="font-bold" x-text="'$' + item.price"></span>
+                        <a href="javascript:void(0)" class="text-blue-500 hover:text-blue-700 text-sm">View Product</a>
+                      </div>
+                    </div>
+                  </div>
+                </template>
+              </div>
+              
+              <!-- Carousel View -->
+              <div x-show="viewMode === 'carousel'" class="relative">
+                <div class="flex overflow-x-auto space-x-4 py-4 scrollbar-hide">
+                  <template x-for="(item, index) in recommendations" :key="index">
+                    <div class="flex-shrink-0 w-64 border rounded-lg overflow-hidden">
+                      <div class="h-48">
+                        <img :src="item.image" :alt="item.name" class="w-full h-full object-cover">
+                      </div>
+                      <div class="p-4">
+                        <h3 class="font-medium" x-text="item.name"></h3>
+                        <p class="text-sm text-gray-500 mt-1 line-clamp-2" x-text="item.description"></p>
+                        <div class="flex items-center justify-between mt-2">
+                          <span class="font-bold" x-text="'$' + item.price"></span>
+                          <a href="javascript:void(0)" class="text-blue-500 hover:text-blue-700 text-sm">View</a>
+                        </div>
+                      </div>
+                    </div>
+                  </template>
+                </div>
+              </div>
+              
+              <!-- Card View -->
+              <div x-show="viewMode === 'cards'" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                <template x-for="(item, index) in recommendations" :key="index">
+                  <div class="border rounded-lg overflow-hidden flex flex-col">
+                    <div class="h-48">
+                      <img :src="item.image" :alt="item.name" class="w-full h-full object-cover">
+                    </div>
+                    <div class="p-4 flex-grow">
+                      <h3 class="font-medium" x-text="item.name"></h3>
+                      <p class="text-sm text-gray-500 mt-2" x-text="item.description"></p>
+                      <div class="mt-4 flex items-center justify-between">
+                        <span class="font-bold text-lg" x-text="'$' + item.price"></span>
+                        <a href="javascript:void(0)" class="bg-blue-500 hover:bg-blue-600 text-white py-1 px-4 rounded-md text-sm">
+                          View Product
+                        </a>
+                      </div>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </div>
+          
+          <!-- Side Panel -->
+          <div class="w-full md:w-1/4">
+            <div class="bg-white shadow rounded-lg p-6 sticky top-6">
+              <h3 class="text-base font-medium mb-4">View Settings</h3>
+              
+              <div class="space-y-4">
+                <p class="text-sm text-gray-500">Choose how you want to display product recommendations:</p>
+                
+                <div class="flex flex-col space-y-2">
+                  <button 
+                    @click="viewMode = 'list'" 
+                    :class="{'active': viewMode === 'list'}" 
+                    class="recommendation-view-btn flex items-center justify-center py-2 px-4 border rounded-md transition-colors"
+                  >
+                    <i class="fas fa-list mr-2"></i> List View
+                  </button>
+                  
+                  <button 
+                    @click="viewMode = 'carousel'" 
+                    :class="{'active': viewMode === 'carousel'}" 
+                    class="recommendation-view-btn flex items-center justify-center py-2 px-4 border rounded-md transition-colors"
+                  >
+                    <i class="fas fa-film mr-2"></i> Carousel View
+                  </button>
+                  
+                  <button 
+                    @click="viewMode = 'cards'" 
+                    :class="{'active': viewMode === 'cards'}" 
+                    class="recommendation-view-btn flex items-center justify-center py-2 px-4 border rounded-md transition-colors"
+                  >
+                    <i class="fas fa-th-large mr-2"></i> Card View
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+    
+    <!-- Footer -->
+    <footer class="bg-white border-t">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+        <p class="text-sm text-gray-500 text-center">&copy; 2025 AI Product Recommendation Engine</p>
+      </div>
+    </footer>
+  </div>
+
+  <script id="app-script">
+    function appData() {
+      return {
+        activeTab: 'bulk',
+        viewMode: 'cards',
+        selectedFile: null,
+        filePreview: null,
+        fileHeaders: [],
+        filePreviewRows: [],
+        isDragging: false,
+        loading: false,
+        recommendations: [],
+        connectionTesting: false,
+        connectionStatus: null,
+        apiCredentials: {
+          platform: '',
+          key: '',
+          secret: ''
+        },
+        manualEntry: {
+          customerId: '',
+          browsedProducts: '',
+          purchasedProducts: ''
+        },
+        
+        get isApiFormValid() {
+          return this.apiCredentials.platform && 
+                 this.apiCredentials.key && 
+                 this.apiCredentials.secret;
+        },
+        
+        get isManualFormValid() {
+          return this.manualEntry.customerId && 
+                 (this.manualEntry.browsedProducts || this.manualEntry.purchasedProducts);
+        },
+        
+        handleFileDrop(e) {
+          this.isDragging = false;
+          const files = e.dataTransfer.files;
+          if (files.length > 0) {
+            this.processFile(files[0]);
+          }
+        },
+        
+        handleFileSelect(e) {
+          const files = e.target.files;
+          if (files.length > 0) {
+            this.processFile(files[0]);
+          }
+        },
+        
+        processFile(file) {
+          if (!file) return;
+          
+          const validTypes = ['text/csv', 'application/json', 'application/vnd.ms-excel'];
+          if (!validTypes.includes(file.type) && 
+              !(file.name.endsWith('.csv') || file.name.endsWith('.json'))) {
+            alert('Please upload a CSV or JSON file.');
+            return;
+          }
+          
+          this.selectedFile = file;
+          
+          // For the prototype, we'll simulate a file preview
+          if (file.name.endsWith('.csv') || file.name.endsWith('.json')) {
+            this.createMockFilePreview(file);
+          }
+        },
+        
+        createMockFilePreview(file) {
+          // This is mock data for the prototype
+          this.fileHeaders = ['customer_id', 'product_viewed', 'product_purchased', 'timestamp'];
+          this.filePreviewRows = [
+            { 
+              customer_id: '1001', 
+              product_viewed: 'SKU123', 
+              product_purchased: 'SKU456', 
+              timestamp: '2025-01-15' 
+            },
+            { 
+              customer_id: '1002', 
+              product_viewed: 'SKU789', 
+              product_purchased: '', 
+              timestamp: '2025-01-16' 
+            },
+            { 
+              customer_id: '1003', 
+              product_viewed: 'SKU234', 
+              product_purchased: 'SKU567', 
+              timestamp: '2025-01-17' 
+            }
+          ];
+          this.filePreview = true;
+        },
+        
+        formatFileSize(bytes) {
+          if (!bytes) return '0 Bytes';
+          const k = 1024;
+          const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+          const i = Math.floor(Math.log(bytes) / Math.log(k));
+          return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        },
+        
+        testConnection() {
+          if (!this.isApiFormValid) return;
+          
+          this.connectionTesting = true;
+          
+          // Simulate API connection test
+          setTimeout(() => {
+            this.connectionTesting = false;
+            this.connectionStatus = 'success';
+            
+            // In the real app, this would be an actual API call
+            // that returns success or error based on the credentials
+          }, 1500);
+        },
+        
+        submitManualEntry() {
+          if (!this.isManualFormValid) return;
+          this.getRecommendations();
+        },
+        
+        getRecommendations() {
+          this.loading = true;
+          
+          // Simulate API call to get recommendations
+          setTimeout(() => {
+            this.loading = false;
+            
+            // Mock recommendation data for the prototype
+            this.recommendations = [
+              {
+                id: 1,
+                name: 'Wireless Headphones',
+                price: '99.99',
+                description: 'Premium wireless headphones with noise cancellation technology and 30-hour battery life.',
+                image: 'https://cdn.pixabay.com/photo/2018/09/17/14/27/headphones-3683983_960_720.jpg'
+              },
+              {
+                id: 2,
+                name: 'Smartphone Stand',
+                price: '24.99',
+                description: 'Adjustable aluminum stand for smartphones and tablets, perfect for desk or bedside use.',
+                image: 'https://cdn.pixabay.com/photo/2016/11/29/09/08/apple-1868496_960_720.jpg'
+              },
+              {
+                id: 3,
+                name: 'Wireless Charger',
+                price: '34.99',
+                description: 'Fast wireless charging pad compatible with all Qi-enabled devices.',
+                image: 'https://cdn.pixabay.com/photo/2018/05/01/13/04/charging-3365839_960_720.jpg'
+              },
+              {
+                id: 4,
+                name: 'Bluetooth Speaker',
+                price: '79.99',
+                description: 'Portable waterproof Bluetooth speaker with 360° sound and 12 hours of playtime.',
+                image: 'https://cdn.pixabay.com/photo/2016/11/22/23/44/electronics-1851218_960_720.jpg'
+              },
+              {
+                id: 5,
+                name: 'Smart Watch',
+                price: '199.99',
+                description: 'Advanced smartwatch with health monitoring features, GPS, and customizable faces.',
+                image: 'https://cdn.pixabay.com/photo/2016/01/12/17/35/watch-1136654_960_720.jpg'
+              },
+              {
+                id: 6,
+                name: 'Laptop Backpack',
+                price: '49.99',
+                description: 'Water-resistant backpack with padded laptop compartment and multiple organization pockets.',
+                image: 'https://cdn.pixabay.com/photo/2017/08/06/12/52/woman-2592247_960_720.jpg'
+              }
+            ];
+          }, 2000);
+        },
+        
+        startOver() {
+          this.selectedFile = null;
+          this.filePreview = null;
+          this.fileHeaders = [];
+          this.filePreviewRows = [];
+          this.recommendations = [];
+          this.connectionStatus = null;
+          this.apiCredentials = {
+            platform: '',
+            key: '',
+            secret: ''
+          };
+          this.manualEntry = {
+            customerId: '',
+            browsedProducts: '',
+            purchasedProducts: ''
+          };
+        }
+      }
+    }
+  </script>
+</body>
+</html>
